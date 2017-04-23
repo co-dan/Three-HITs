@@ -2,6 +2,7 @@
 
 polynomial.v
 hit_structure.v
+hit_recursion.v
 examples.v
 colim.v
 hit_existence.v
