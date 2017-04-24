@@ -90,6 +90,32 @@ Proof.
   induction e; simpl; try (rewrite IHe); try reflexivity.
   { rewrite IHe1. rewrite IHe2. reflexivity. }
 Qed.
+
+(* If [h] commutes with constructors, then it commutes with all endpoints. *)
+Fixpoint endpoint_act_compute
+  (P Q : polynomial)
+  (e : endpoint C P Q)
+  h x
+  {struct e}
+:
+  (forall i u, h (c i u) = f i (poly_map (C i) h u)) ->
+  poly_map Q h (endpoint_act c e x) = endpoint_act f e (poly_map P h x).
+Proof.
+  intro H.
+  destruct e; simpl; try reflexivity.
+  (* endpoint_constr *)
+  - etransitivity. apply H. f_ap. apply endpoint_act_compute. apply H.
+  (* endpoint_fst *)
+  - apply (ap fst (endpoint_act_compute _ _ e _ _ H)).
+  - apply (ap snd (endpoint_act_compute _ _ e _ _ H)).
+  (* endpoint_pair *)
+  - apply path_prod ; apply endpoint_act_compute, H.
+  (* endpoint_inl *)
+  - f_ap. apply endpoint_act_compute, H. 
+  (* endpoint_inr *)
+  - f_ap. apply endpoint_act_compute, H. 
+Defined.
+
 End PolyFamConst.
 
 Section NonDepRec.
@@ -124,39 +150,107 @@ Proof.
   apply (poly_fam_const _ _ (sig_point Σ i) u h).
 Defined.
 
+Definition path_in_over (H : HIT Σ) {F : Type} 
+  (c : point_in F (hit_point H) (hit_path H))
+  (p : path_in F c) :
+  path_over Σ (point_in_over H c).
+Proof.
+intros i u h. simpl.
+etransitivity.
+- apply transport_const.
+- specialize (p i).
+  pose (Gek:=(poly_fam_const  _ _ (sig_path_param Σ i) u h)).
+  specialize (p Gek). unfold Gek in p.
+  assert (point_in_over H c = (f' (sig_point_index Σ) (sig_point Σ) F H c)) as Moo.
+  { unfold point_in_over. unfold f'. reflexivity. }
+  assert (poly_fam_const F H poly_var
+       (endpoint_act (hit_point H) (sig_path_lhs Σ i) u)
+       (endpoint_dact (hit_point H)
+          (f' (sig_point_index Σ) (sig_point Σ) F H c)
+          (sig_path_lhs Σ i) u h)
+  = poly_fam_const F H poly_var
+       (endpoint_act (hit_point H) (sig_path_rhs Σ i) u)
+       (endpoint_dact (hit_point H)
+          (f' (sig_point_index Σ) (sig_point Σ) F H c)
+          (sig_path_rhs Σ i) u h)) as COWEQ.
+  { etransitivity. symmetry.
+    apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_lhs Σ i) u h).
+    rewrite p. 
+    apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_rhs Σ i) u h). }
+  rewrite <- Moo in COWEQ. 
+  simpl in COWEQ. apply COWEQ.
+Defined.
+
 Definition hit_rec (H : HIT Σ) :
   forall (F : Type)
          (c : point_in F (hit_point H) (hit_path H))
          (p : path_in F c)
-         (x : H), F.
+         (x : H), F := fun F c p x =>
+    hit_ind H (fun _ => F) (point_in_over H c) (path_in_over H c p) x.
+
+Lemma poly_fam_const_dmap H F (f : H -> F) (P : polynomial) 
+ (t : poly_act P H) :
+poly_fam_const F H P t (poly_dmap P f t) =
+poly_map P f t.
 Proof.
-  intros.
-  simple refine (hit_ind H (fun _ => F) (point_in_over H c) _ x).
-  intros i u h. simpl. 
-  etransitivity.
-  - apply transport_const.
-  - specialize (p i).
-    pose (Gek:=(poly_fam_const  _ _ (sig_path_param Σ i) u h)).
-    specialize (p Gek). unfold Gek in p.
-    assert (point_in_over H c = (f' (sig_point_index Σ) (sig_point Σ) F H c)) as Moo.
-    { unfold point_in_over. unfold f'. reflexivity. }
-    assert (poly_fam_const F H poly_var
-         (endpoint_act (hit_point H) (sig_path_lhs Σ i) u)
-         (endpoint_dact (hit_point H)
-            (f' (sig_point_index Σ) (sig_point Σ) F H c)
-            (sig_path_lhs Σ i) u h)
-    = poly_fam_const F H poly_var
-         (endpoint_act (hit_point H) (sig_path_rhs Σ i) u)
-         (endpoint_dact (hit_point H)
-            (f' (sig_point_index Σ) (sig_point Σ) F H c)
-            (sig_path_rhs Σ i) u h)) as COWEQ.
-    { etransitivity. symmetry.
-      apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_lhs Σ i) u h).
-      rewrite p. 
-      apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_rhs Σ i) u h). }
-    rewrite <- Moo in COWEQ.
-    (* Eval compute in (poly_fam poly_var (Fconst F H)
-         (endpoint_act (hit_point H) (sig_path_lhs Σ i) u)).*)
-    simpl in COWEQ. apply COWEQ.
+induction P; simpl; try reflexivity.
+- destruct t as [t t']. simpl.
+  apply path_prod; simpl.
+  + apply IHP1.
+  + apply IHP2.
+- destruct t as [t | t]; simpl; f_ap.
+Qed.
+
+Theorem hit_rec_point_beta (H : HIT Σ) (F : Type)
+         (c : point_in F (hit_point H) (hit_path H))
+         (p : path_in F c) i (t : poly_act (sig_point Σ i) H) :
+         hit_rec H F c p (hit_point H i t) =
+          c i (poly_map (sig_point Σ i) (hit_rec H F c p) t).
+Proof.
+unfold hit_rec. 
+rewrite hit_point_beta.
+unfold point_in_over.
+f_ap. apply poly_fam_const_dmap.
+Qed.
+
+
+Definition hit_rec_path_beta_type (H : HIT Σ) (F : Type)
+         (c : point_in F (hit_point H) (hit_path H))
+         (p : path_in F c) (i : sig_path_index Σ) 
+         (u : poly_act (sig_path_param Σ i) H) : Type.
+Proof.
+pose (α := ap (hit_rec H F c p) (hit_path H i u)).
+pose (β := p i (poly_map (sig_path_param Σ i) (hit_rec H F c p) u)).
+assert (qlhs : hit_rec H F c p
+      (endpoint_act (hit_point H) (sig_path_lhs Σ i) u)
+       = endpoint_act c (sig_path_lhs Σ i)
+      (poly_map (sig_path_param Σ i) (hit_rec H F c p) u)).
+{ apply (endpoint_act_compute _ _ F H (hit_point H) c _ _ (sig_path_lhs Σ i) (hit_rec H F c p) u).
+  apply hit_rec_point_beta. }
+assert (qrhs : hit_rec H F c p
+      (endpoint_act (hit_point H) (sig_path_rhs Σ i) u)
+       = endpoint_act c (sig_path_rhs Σ i)
+      (poly_map (sig_path_param Σ i) (hit_rec H F c p) u)).
+{ apply (endpoint_act_compute _ _ F H (hit_point H) c _ _ (sig_path_rhs Σ i) (hit_rec H F c p) u).
+  apply hit_rec_point_beta. }
+symmetry in qlhs.
+pose (β' := transport (fun z =>
+              z = endpoint_act c (sig_path_rhs Σ i)
+      (poly_map (sig_path_param Σ i) (hit_rec H F c p) u)) qlhs β).
+simpl in β'.
+symmetry in qrhs.
+pose (β'' := transport (fun z =>
+              hit_rec H F c p (endpoint_act (hit_point H) (sig_path_lhs Σ i) u) 
+                  = z) qrhs β').
+simpl in β''.
+exact (α = β'').
 Defined.
+
+Theorem hit_rec_path_beta (H : HIT Σ) (F : Type)
+         (c : point_in F (hit_point H) (hit_path H))
+         (p : path_in F c) i u :
+   hit_rec_path_beta_type H F c p i u.
+Proof.
+About apD_const.
+Abort.
 End NonDepRec.
