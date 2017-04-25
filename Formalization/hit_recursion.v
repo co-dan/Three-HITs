@@ -1,11 +1,6 @@
 Require Import HoTT.
 Require Import polynomial hit_structure.
 
-
-Arguments hit_point {_} _ _ _.
-Arguments hit_path {_} _ _ _.
-Arguments hit_ind {_} _ _ _ _ _.
-
 (** Going from polynomial actions to polynomial 
     liftings of constant type families*)
 Section PolyFamConst.
@@ -28,22 +23,22 @@ Variable f : forall i, poly_act (C i) A -> A.
   forall (y : P[B]) (h : \bar{P}(\x:B.A) y) : P[A] 
   converting an element of the constant family into an 
   element of P[A] *)
-Definition poly_fam_const (P : polynomial) 
-  y (H : poly_fam P Fconst y) : poly_act P A.
+Fixpoint poly_fam_const (P : polynomial) 
+  (y : poly_act P B) (H : poly_fam P Fconst y) 
+  {struct P} : poly_act P A.
 Proof.
-  induction P; simpl in *.
+  destruct P; simpl in *.
   - apply H.
   - apply H.
   - destruct y as [y1 y2]. destruct H as [H1 H2].
     simpl in *.
     split. 
-    apply (IHP1 y1 H1).
-    apply (IHP2 y2 H2).
+    apply (poly_fam_const P1 y1 H1).
+    apply (poly_fam_const P2 y2 H2).
   - destruct y as [y | y].
-    {  left. apply (IHP1 y H). }
-    { right. apply (IHP2 y H). }
+    {  left. apply (poly_fam_const P1 y H). }
+    { right. apply (poly_fam_const P2 y H). }
 Defined.
-
 
 Lemma poly_fam_const_inj P y H H':
 poly_fam_const P y H = poly_fam_const P y H' ->
@@ -63,35 +58,28 @@ apply path_prod; simpl; [apply IHP1 | apply IHP2]; assumption.
   + apply IHP2. eapply path_sum_inr. exact Heq.
 Defined.
 
-Lemma poly_fam_const_inj_var y y' H H':
-poly_fam_const poly_var y H = poly_fam_const poly_var y' H' ->
-H = H'.
-Proof.
-simpl. exact idmap.
-Qed.
+(** We also need a suitable image of constuctors *)
+Definition f_im :
+  forall i (x : poly_act (C i) B), 
+  poly_fam (C i) Fconst x -> A
+  := fun i x h => f i (poly_fam_const (C i) x h).
 
-Definition f' :
-  forall i (x : poly_act (C i) B), poly_fam (C i) Fconst x 
-   -> A.
-Proof.
-  intros i x h.
-  apply (f i).
-  apply (poly_fam_const (C i) x h).
-Defined.
 
 (** [poly_fam_const] commutes with endpoint actions *)
-Lemma cowd (P Q : polynomial) 
+Lemma poly_fam_const_endpoint_act (P Q : polynomial) 
   (e : @endpoint I C P Q) 
   (x : poly_act P B)
   (h : poly_fam P Fconst x):
 endpoint_act f e (poly_fam_const P x h) =
-poly_fam_const Q (endpoint_act c e x) (endpoint_dact c f' e x h).
+poly_fam_const Q (endpoint_act c e x) (endpoint_dact c f_im e x h).
 Proof.
   induction e; simpl; try (rewrite IHe); try reflexivity.
   { rewrite IHe1. rewrite IHe2. reflexivity. }
 Qed.
 
-(* If [h] commutes with constructors, then it commutes with all endpoints. *)
+(* If [h] commutes with constructors, then it commutes with all endpoints. 
+   This is similar to [endpoint_dact_compute].
+*)
 Fixpoint endpoint_act_compute
   (P Q : polynomial)
   (e : endpoint C P Q)
@@ -115,13 +103,15 @@ Proof.
   (* endpoint_inr *)
   - f_ap. apply endpoint_act_compute, H. 
 Defined.
-
 End PolyFamConst.
 
 Section NonDepRec.
+Local Arguments hit_point {_} _ _ _.
+Local Arguments hit_path {_} _ _ _.
+Local Arguments hit_ind {_} _ _ _ _ _.
 Variable Σ : hit_signature.
 
-(** For non-dependent recursion *)
+(** Points and paths in a type [F] for non-dependent recursion *)
 Definition point_in
   {H : Type} (* the carrier type *)
   (F : Type)
@@ -130,26 +120,23 @@ Definition point_in
               endpoint_act c (sig_path_rhs Σ j) u) (* path constructors *)
   :=
   forall i, poly_act (sig_point Σ i) F -> F.
-
 Definition path_in
   {H : HIT Σ}
-  (Y : Type)
-  (c : point_in Y (hit_point H) (hit_path H))
+  (F : Type)
+  (c : point_in F (hit_point H) (hit_path H))
   :=
   forall j
-    (x : poly_act (sig_path_param Σ j) Y),
+    (x : poly_act (sig_path_param Σ j) F),
     endpoint_act c (sig_path_lhs Σ j) x =
     endpoint_act c (sig_path_rhs Σ j) x.
 
-Definition point_in_over (H : HIT Σ) {U : Type}
-  (c : point_in U (hit_point H) (hit_path H)) :
-  point_over Σ (fun (_ : H) => U) (hit_point H) (hit_path H).
-Proof.
-  intros i u h. 
-  apply (c i).
-  apply (poly_fam_const _ _ (sig_point Σ i) u h).
-Defined.
+(** Given a point in a type, construct a point over a constant type family *)
+Definition point_in_over (H : HIT Σ) {F : Type}
+  (c : point_in F (hit_point H) (hit_path H)) :
+  point_over Σ (fun (_ : H) => F) (hit_point H) (hit_path H)
+  := f_im _ _ F H c.
 
+(** Given a path in a type, construct a path over a constant type family *)
 Definition path_in_over (H : HIT Σ) {F : Type} 
   (c : point_in F (hit_point H) (hit_path H))
   (p : path_in F c) :
@@ -159,26 +146,12 @@ intros i u h. simpl.
 etransitivity.
 - apply transport_const.
 - specialize (p i).
-  pose (Gek:=(poly_fam_const  _ _ (sig_path_param Σ i) u h)).
-  specialize (p Gek). unfold Gek in p.
-  assert (point_in_over H c = (f' (sig_point_index Σ) (sig_point Σ) F H c)) as Moo.
-  { unfold point_in_over. unfold f'. reflexivity. }
-  assert (poly_fam_const F H poly_var
-       (endpoint_act (hit_point H) (sig_path_lhs Σ i) u)
-       (endpoint_dact (hit_point H)
-          (f' (sig_point_index Σ) (sig_point Σ) F H c)
-          (sig_path_lhs Σ i) u h)
-  = poly_fam_const F H poly_var
-       (endpoint_act (hit_point H) (sig_path_rhs Σ i) u)
-       (endpoint_dact (hit_point H)
-          (f' (sig_point_index Σ) (sig_point Σ) F H c)
-          (sig_path_rhs Σ i) u h)) as COWEQ.
-  { etransitivity. symmetry.
-    apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_lhs Σ i) u h).
-    rewrite p. 
-    apply (cowd (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_rhs Σ i) u h). }
-  rewrite <- Moo in COWEQ. 
-  simpl in COWEQ. apply COWEQ.
+  specialize (p (poly_fam_const  _ _ (sig_path_param Σ i) u h)).
+  etransitivity. 
+  + symmetry.
+    apply (poly_fam_const_endpoint_act (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_lhs Σ i) u h).
+  + etransitivity; [apply p|].
+    apply (poly_fam_const_endpoint_act (sig_point_index Σ) (sig_point Σ) F H (hit_point H) c _ _ (sig_path_rhs Σ i) u h). 
 Defined.
 
 Definition hit_rec (H : HIT Σ) :
@@ -188,10 +161,11 @@ Definition hit_rec (H : HIT Σ) :
          (x : H), F := fun F c p x =>
     hit_ind H (fun _ => F) (point_in_over H c) (path_in_over H c p) x.
 
+(** For the computational rule we will need the following lemma *)
 Lemma poly_fam_const_dmap H F (f : H -> F) (P : polynomial) 
  (t : poly_act P H) :
-poly_fam_const F H P t (poly_dmap P f t) =
-poly_map P f t.
+  poly_fam_const F H P t (poly_dmap P f t) =
+  poly_map P f t.
 Proof.
 induction P; simpl; try reflexivity.
 - destruct t as [t t']. simpl.
@@ -209,11 +183,12 @@ Theorem hit_rec_point_beta (H : HIT Σ) (F : Type)
 Proof.
 unfold hit_rec. 
 rewrite hit_point_beta.
-unfold point_in_over.
+unfold point_in_over, f_im.
 f_ap. apply poly_fam_const_dmap.
 Qed.
 
 
+(** It is quite tricky to even state the computational rule for paths *)
 Definition hit_rec_path_beta_type (H : HIT Σ) (F : Type)
          (c : point_in F (hit_point H) (hit_path H))
          (p : path_in F c) (i : sig_path_index Σ) 
